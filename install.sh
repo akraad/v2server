@@ -1,11 +1,12 @@
 #!/bin/bash
 #
 # A lightweight installer for Xray-core with VLESS+REALITY.
-# Bypasses the official installer to ensure the latest version is installed.
+# Final diagnostic version to verify file integrity after installation.
 
 # Function to check for required commands
 check_dependencies() {
-    for cmd in curl socat uuidgen; do
+    # Add sha256sum to dependencies
+    for cmd in curl socat uuidgen sha256sum; do
         if ! command -v "$cmd" &> /dev/null; then
             echo "Error: $cmd is not installed. Please install it first."
             exit 1
@@ -32,7 +33,7 @@ kill_processes_on_ports() {
 
 
 # --- Main script execution ---
-echo "Starting Xray-core installation with VLESS+REALITY..."
+echo "Starting Xray-core installation with VLESS+REALITY (Final Diagnostic Attempt)..."
 set -e # Exit immediately if a command exits with a non-zero status.
 
 # 1. Check for dependencies
@@ -51,8 +52,8 @@ rm -f /etc/systemd/system/xray.service
 rm -f /etc/systemd/system/xray@.service
 systemctl daemon-reload
 
-# 4. Install Xray-core manually
-echo "Installing latest Xray-core manually..."
+# 4. Install Xray-core manually and verify integrity
+echo "Installing latest Xray-core manually and verifying integrity..."
 LATEST_TAG=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 if [ -z "$LATEST_TAG" ]; then
     echo "Error: Failed to fetch the latest Xray version tag."
@@ -81,10 +82,38 @@ TMP_DIR=$(mktemp -d)
 echo "Downloading Xray-core from $ZIP_URL"
 curl -L -o "${TMP_DIR}/xray.zip" "$ZIP_URL"
 unzip -o "${TMP_DIR}/xray.zip" -d "${TMP_DIR}"
-install -m 755 "${TMP_DIR}/xray" /usr/local/bin/xray
+
+# --- Checksum Verification Step ---
+DOWNLOADED_CHECKSUM=$(sha256sum "${TMP_DIR}/xray" | awk '{print $1}')
+echo "---"
+echo "--- INTEGRITY CHECK ---"
+echo "Checksum of downloaded (correct) xray binary: $DOWNLOADED_CHECKSUM"
+
+# Force move the binary
+mv -f "${TMP_DIR}/xray" /usr/local/bin/xray
+chmod 755 /usr/local/bin/xray
+
+INSTALLED_CHECKSUM=$(sha256sum /usr/local/bin/xray | awk '{print $1}')
+echo "Checksum of installed xray binary at /usr/local/bin/xray: $INSTALLED_CHECKSUM"
+
+if [ "$DOWNLOADED_CHECKSUM" != "$INSTALLED_CHECKSUM" ]; then
+    echo "---"
+    echo "FATAL ERROR: CHECKSUM MISMATCH!"
+    echo "The xray file was altered after being moved to /usr/local/bin/xray."
+    echo "This proves that an external process on your server is interfering with the installation."
+    echo "Please contact your server administrator and show them this log."
+    echo "The issue is outside the control of this script."
+    echo "---"
+    exit 1
+fi
+echo "Checksums match. The correct binary is now installed."
+echo "--- END INTEGRITY CHECK ---"
+echo "---"
+# --- End Verification Step ---
+
 install -d /usr/local/share/xray/
-install -m 644 "${TMP_DIR}/geoip.dat" /usr/local/share/xray/
 install -m 644 "${TMP_DIR}/geosite.dat" /usr/local/share/xray/
+install -m 644 "${TMP_DIR}/geoip.dat" /usr/local/share/xray/
 rm -rf "${TMP_DIR}"
 
 # Create config directory
