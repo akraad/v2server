@@ -28,6 +28,16 @@ kill_processes_on_ports() {
 # Main script execution
 echo "Starting Xray-core installation with VLESS+REALITY..."
 
+# --- Start Debugging Info ---
+echo "---"
+echo "--- DEBUGGING: Initial State ---"
+echo "PATH: $PATH"
+echo "which xray: $(which xray)"
+echo "type -a xray:"
+type -a xray
+echo "---"
+# --- End Debugging Info ---
+
 # 1. Check for dependencies
 check_dependencies
 
@@ -35,36 +45,59 @@ check_dependencies
 kill_processes_on_ports
 
 # 3. Remove any old versions of Xray
-echo "Removing any old versions of Xray..."
+echo "---"
+echo "--- DEBUGGING: Removing old version ---"
+echo "Running 'ls -l /usr/local/bin/xray' before removal:"
+ls -l /usr/local/bin/xray
 systemctl stop xray
 systemctl disable xray
 rm -f /usr/local/bin/xray
 rm -rf /usr/local/etc/xray
 rm -f /etc/systemd/system/xray.service
 rm -f /etc/systemd/system/xray@.service
+echo "Running 'ls -l /usr/local/bin/xray' after removal:"
+ls -l /usr/local/bin/xray
+echo "---"
 
 # 4. Install Xray-core
 echo "Installing Xray-core..."
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
-# 4. Generate X25519 keys
+# --- Start Debugging Info ---
+echo "---"
+echo "--- DEBUGGING: After Installation ---"
+echo "Running 'ls -l /usr/local/bin/xray':"
+ls -l /usr/local/bin/xray
+echo "Running '/usr/local/bin/xray version':"
+/usr/local/bin/xray version
+echo "---"
+# --- End Debugging Info ---
+
+
+# 5. Generate X25519 keys
 echo "Generating X25519 keys..."
+echo "---"
+echo "--- DEBUGGING: Key Generation ---"
+echo "Raw output of '/usr/local/bin/xray x25519':"
+/usr/local/bin/xray x25519
+echo "---"
+
 keys=$(/usr/local/bin/xray x25519)
 private_key=$(echo "$keys" | awk '/Private key:/ {print $3}')
 public_key=$(echo "$keys" | awk '/Public key:/ {print $3}')
 
 if [ -z "$private_key" ] || [ -z "$public_key" ]; then
-    echo "Error: Failed to generate X25519 keys."
+    echo "Error: Failed to generate X25519 keys. Please check the debug output above."
     exit 1
 fi
 
 echo "Keys generated successfully."
 
-# 5. Generate UUID
+# 6. Generate UUID
 uuid=$(uuidgen)
 echo "Generated UUID: $uuid"
 
-# 6. Get server public IP
+# 7. Get server public IP
 server_ip=$(curl -s ipinfo.io/ip)
 if [ -z "$server_ip" ]; then
     echo "Error: Failed to get server public IP."
@@ -73,7 +106,7 @@ fi
 echo "Server IP: $server_ip"
 
 
-# 7. Create config.json
+# 8. Create config.json
 cat > /usr/local/etc/xray/config.json << EOF
 {
   "log": {
@@ -199,12 +232,12 @@ cat > /usr/local/etc/xray/config.json << EOF
 }
 EOF
 
-# 8. Enable and restart Xray service
+# 9. Enable and restart Xray service
 echo "Enabling and restarting Xray service..."
 systemctl enable xray
 systemctl restart xray
 
-# 9. Display VLESS links
+# 10. Display VLESS links
 echo "=================================================="
 echo "Xray installation and configuration complete."
 echo "Here are your VLESS links:"
