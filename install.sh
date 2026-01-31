@@ -34,9 +34,18 @@ check_dependencies
 # 2. Kill existing processes on target ports
 kill_processes_on_ports
 
-# 3. Install Xray-core
+# 3. Remove any old versions of Xray
+echo "Removing any old versions of Xray..."
+systemctl stop xray
+systemctl disable xray
+rm -f /usr/local/bin/xray
+rm -rf /usr/local/etc/xray
+rm -f /etc/systemd/system/xray.service
+rm -f /etc/systemd/system/xray@.service
+
+# 4. Install Xray-core
 echo "Installing Xray-core..."
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --force
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
 # 4. Generate X25519 keys
 echo "Generating X25519 keys..."
