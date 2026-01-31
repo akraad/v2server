@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x # Enable shell debugging
 #
 # A lightweight installer for Xray-core with VLESS+REALITY.
 # Final diagnostic version to verify file integrity after installation.
@@ -16,19 +17,30 @@ check_dependencies() {
 
 # Function to kill processes on specified ports
 kill_processes_on_ports() {
+    echo "--- DEBUG: Entering kill_processes_on_ports function ---"
     for port in 443 2020 8181; do
         echo "Checking for processes on port $port..."
         # Use fuser, it's more common than lsof
         if command -v "fuser" &> /dev/null; then
+            echo "Using fuser to check port $port."
             fuser -k -s -n tcp "$port"
+            if [ $? -eq 0 ]; then
+                echo "Process(es) killed on port $port using fuser."
+            else
+                echo "No process found on port $port using fuser."
+            fi
         else # Fallback to lsof if fuser is not available
+            echo "fuser not found. Using lsof to check port $port."
             pid=$(lsof -t -i:"$port")
             if [ -n "$pid" ]; then
-                echo "Killing process with PID $pid on port $port."
+                echo "Killing process with PID $pid on port $port using kill -9."
                 kill -9 "$pid"
+            else
+                echo "No process found on port $port using lsof."
             fi
         fi
     done
+    echo "--- DEBUG: Exiting kill_processes_on_ports function ---"
 }
 
 
