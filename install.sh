@@ -1,4 +1,7 @@
 #!/bin/bash
+#
+# A lightweight installer for Xray-core with VLESS+REALITY.
+# Bypasses the official installer to ensure the latest version is installed.
 
 # Function to check for required commands
 check_dependencies() {
@@ -14,29 +17,23 @@ check_dependencies() {
 kill_processes_on_ports() {
     for port in 443 2020 8181; do
         echo "Checking for processes on port $port..."
-        pid=$(lsof -t -i:$port)
-        if [ -n "$pid" ]; then
-            echo "Killing process with PID $pid on port $port."
-            kill -9 "$pid"
-        else
-            echo "No process found on port $port."
+        # Use fuser, it's more common than lsof
+        if command -v "fuser" &> /dev/null; then
+            fuser -k -s -n tcp "$port"
+        else # Fallback to lsof if fuser is not available
+            pid=$(lsof -t -i:"$port")
+            if [ -n "$pid" ]; then
+                echo "Killing process with PID $pid on port $port."
+                kill -9 "$pid"
+            fi
         fi
     done
 }
 
 
-# Main script execution
+# --- Main script execution ---
 echo "Starting Xray-core installation with VLESS+REALITY..."
-
-# --- Start Debugging Info ---
-echo "---"
-echo "--- DEBUGGING: Initial State ---"
-echo "PATH: $PATH"
-echo "which xray: $(which xray)"
-echo "type -a xray:"
-type -a xray
-echo "---"
-# --- End Debugging Info ---
+set -e # Exit immediately if a command exits with a non-zero status.
 
 # 1. Check for dependencies
 check_dependencies
@@ -45,49 +42,90 @@ check_dependencies
 kill_processes_on_ports
 
 # 3. Remove any old versions of Xray
-echo "---"
-echo "--- DEBUGGING: Removing old version ---"
-echo "Running 'ls -l /usr/local/bin/xray' before removal:"
-ls -l /usr/local/bin/xray
-systemctl stop xray
-systemctl disable xray
+echo "Removing any old versions of Xray to ensure a clean install..."
+systemctl stop xray >/dev/null 2>&1 || echo "Xray service not found, skipping stop."
+systemctl disable xray >/dev/null 2>&1 || echo "Xray service not found, skipping disable."
 rm -f /usr/local/bin/xray
 rm -rf /usr/local/etc/xray
 rm -f /etc/systemd/system/xray.service
 rm -f /etc/systemd/system/xray@.service
-echo "Running 'ls -l /usr/local/bin/xray' after removal:"
-ls -l /usr/local/bin/xray
-echo "---"
+systemctl daemon-reload
 
-# 4. Install Xray-core
-echo "Installing Xray-core..."
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+# 4. Install Xray-core manually
+echo "Installing latest Xray-core manually..."
+LATEST_TAG=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+if [ -z "$LATEST_TAG" ]; then
+    echo "Error: Failed to fetch the latest Xray version tag."
+    exit 1
+fi
+echo "Latest version found: $LATEST_TAG"
+ZIP_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_TAG}/Xray-linux-64.zip"
 
-# --- Start Debugging Info ---
-echo "---"
-echo "--- DEBUGGING: After Installation ---"
-echo "Running 'ls -l /usr/local/bin/xray':"
-ls -l /usr/local/bin/xray
-echo "Running '/usr/local/bin/xray version':"
+# Check for unzip and install if not present
+if ! command -v "unzip" &> /dev/null; then
+    echo "'unzip' is not installed. Attempting to install..."
+    if command -v "apt-get" &> /dev/null; then
+        apt-get update && apt-get install -y unzip
+    elif command -v "yum" &> /dev/null; then
+        yum install -y unzip
+    elif command -v "dnf" &> /dev/null; then
+        dnf install -y unzip
+    else
+        echo "Error: Could not install 'unzip'. Please install it manually and re-run the script."
+        exit 1
+    fi
+fi
+
+# Download and install
+TMP_DIR=$(mktemp -d)
+echo "Downloading Xray-core from $ZIP_URL"
+curl -L -o "${TMP_DIR}/xray.zip" "$ZIP_URL"
+unzip -o "${TMP_DIR}/xray.zip" -d "${TMP_DIR}"
+install -m 755 "${TMP_DIR}/xray" /usr/local/bin/xray
+install -d /usr/local/share/xray/
+install -m 644 "${TMP_DIR}/geoip.dat" /usr/local/share/xray/
+install -m 644 "${TMP_DIR}/geosite.dat" /usr/local/share/xray/
+rm -rf "${TMP_DIR}"
+
+# Create config directory
+install -d /usr/local/etc/xray
+
+# Create systemd service file
+echo "Creating systemd service file..."
+cat > /etc/systemd/system/xray.service << EOF
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+echo "Latest Xray-core installed successfully."
+echo -n "Installed version: "
 /usr/local/bin/xray version
-echo "---"
-# --- End Debugging Info ---
-
 
 # 5. Generate X25519 keys
 echo "Generating X25519 keys..."
-echo "---"
-echo "--- DEBUGGING: Key Generation ---"
-echo "Raw output of '/usr/local/bin/xray x25519':"
-/usr/local/bin/xray x25519
-echo "---"
-
 keys=$(/usr/local/bin/xray x25519)
 private_key=$(echo "$keys" | awk '/Private key:/ {print $3}')
 public_key=$(echo "$keys" | awk '/Public key:/ {print $3}')
 
 if [ -z "$private_key" ] || [ -z "$public_key" ]; then
-    echo "Error: Failed to generate X25519 keys. Please check the debug output above."
+    echo "Error: Failed to generate X25519 keys."
     exit 1
 fi
 
@@ -95,18 +133,16 @@ echo "Keys generated successfully."
 
 # 6. Generate UUID
 uuid=$(uuidgen)
-echo "Generated UUID: $uuid"
 
 # 7. Get server public IP
 server_ip=$(curl -s ipinfo.io/ip)
 if [ -z "$server_ip" ]; then
-    echo "Error: Failed to get server public IP."
+    echo "Error: Could not automatically detect server IP. Please edit the config manually."
     exit 1
 fi
-echo "Server IP: $server_ip"
-
 
 # 8. Create config.json
+echo "Creating config.json..."
 cat > /usr/local/etc/xray/config.json << EOF
 {
   "log": {
@@ -142,10 +178,7 @@ cat > /usr/local/etc/xray/config.json << EOF
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": [
-          "http",
-          "tls"
-        ]
+        "destOverride": [ "http", "tls" ]
       }
     },
     {
@@ -177,10 +210,7 @@ cat > /usr/local/etc/xray/config.json << EOF
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": [
-          "http",
-          "tls"
-        ]
+        "destOverride": [ "http", "tls" ]
       }
     },
     {
@@ -212,22 +242,13 @@ cat > /usr/local/etc/xray/config.json << EOF
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": [
-          "http",
-          "tls"
-        ]
+        "destOverride": [ "http", "tls" ]
       }
     }
   ],
   "outbounds": [
-    {
-      "protocol": "freedom",
-      "tag": "direct"
-    },
-    {
-      "protocol": "blackhole",
-      "tag": "block"
-    }
+    { "protocol": "freedom", "tag": "direct" },
+    { "protocol": "blackhole", "tag": "block" }
   ]
 }
 EOF
@@ -251,3 +272,5 @@ echo ""
 echo "3. Port 8181 (SNI: www.bing.com):"
 echo "vless://$uuid@$server_ip:8181?security=reality&sni=www.bing.com&flow=xtls-rprx-vision&publicKey=$public_key&type=tcp#XRAY-8181"
 echo "=================================================="
+
+set +e
