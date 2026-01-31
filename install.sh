@@ -6,24 +6,12 @@
 set -e
 
 # --- PRE-FLIGHT CHECKS ---
-# Must be run as root
+# Pre-flight check: Must be run as root
 if [ "$EUID" -ne 0 ]; then
   echo "Please run this script as root."
   exit 1
 fi
 
-# Kill any running processes on the ports we need
-echo "Checking for running processes on ports 443, 2020, 8181..."
-for port in 443 2020 8181; do
-    if command -v "fuser" &> /dev/null; then
-        fuser -k -s -n tcp "$port" || true # Ignore errors if port is not in use
-    else
-        pid=$(lsof -t -i:"$port")
-        if [ -n "$pid" ]; then
-            kill -9 "$pid"
-        fi
-    fi
-done
 
 
 # --- EXECUTE PACKAGES ---
