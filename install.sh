@@ -36,7 +36,7 @@ kill_processes_on_ports
 
 # 3. Install Xray-core
 echo "Installing Xray-core..."
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --force
 
 # 4. Generate X25519 keys
 echo "Generating X25519 keys..."
